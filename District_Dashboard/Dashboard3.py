@@ -1,3 +1,5 @@
+# Sri Lanka Environmental Dashboard (Improved)
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -12,47 +14,67 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- PAGE STYLE: Make background white & readable ---
+st.markdown(
+    """
+    <style>
+    .main, .block-container {
+        background-color: white;
+        color: black;
+    }
+    .dataframe th {
+        background-color: #4CAF50 !important;
+        color: white !important;
+        text-align: center !important;
+    }
+    .dataframe td {
+        text-align: center !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # --- LOAD DATA WITH CACHE ---
 @st.cache_data
 def load_data():
-    # Original data (actual values)
     df = pd.read_csv('Srilanka/District_Dashboard/District_Data_Modified.csv')
-    # Load shapefile
     shp_path = "Srilanka/District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp"
     gdf = gpd.read_file(shp_path)
     return df, gdf
 
 df, gdf = load_data()
 
-# --- DATA PREPROCESSING FOR SCORING ---
-
-features = df.columns[1:]  # all parameters except district name
+# --- PREPROCESSING ---
+features = df.columns[1:]
 scaler = MinMaxScaler()
 scaled_data = df.copy()
 scaled_data[features] = scaler.fit_transform(df[features])
 
-# Define good and bad parameters
-good = ['Rain_dist_Mean_Rainfall_mm', 'District_Mean_NDVI_2020_2025_Mean_NDVI',
-        'canopy_dist_Mean_Canopy_Height', 'treeloss_treecover_Mean_TreeCover2000']
-bad = ['co_dist_Mean_CO', 'District_Mean_NO2_2019_2024_Mean_NO2',
-       'treeloss_treecover_Forest_Loss_km2', 'District_Mean_SI_2020_2025_Mean_SI']
+good = [
+    'Rain_dist_Mean_Rainfall_mm',
+    'District_Mean_NDVI_2020_2025_Mean_NDVI',
+    'canopy_dist_Mean_Canopy_Height',
+    'treeloss_treecover_Mean_TreeCover2000'
+]
+bad = [
+    'co_dist_Mean_CO',
+    'District_Mean_NO2_2019_2024_Mean_NO2',
+    'treeloss_treecover_Forest_Loss_km2',
+    'District_Mean_SI_2020_2025_Mean_SI'
+]
 
-# Invert bad parameters
 for b in bad:
     scaled_data[b] = 1 - scaled_data[b]
 
-# Composite score
 scaled_data['Environmental_Score'] = scaled_data[good + bad].mean(axis=1)
 scaled_data['Rank'] = scaled_data['Environmental_Score'].rank(ascending=False, method='min').astype(int)
 
-# --- MERGE ALL ORIGINAL PARAMS INTO GEO DATAFRAME FOR MAPPING ---
-
-# Merge original data (df) + scaled_data scoring columns to gdf for map & table use
-merged = gdf.merge(df, on='ADM2_EN')  # original actual parameters
+# --- MERGE GEO DATA ---
+merged = gdf.merge(df, on='ADM2_EN')
 merged = merged.merge(scaled_data[['ADM2_EN', 'Environmental_Score', 'Rank']], on='ADM2_EN')
 
 # --- SIDEBAR ---
-
 st.sidebar.header("🌿 Filter and Explore")
 
 district_options = st.sidebar.multiselect(
@@ -68,49 +90,15 @@ selected_param = st.sidebar.selectbox(
 )
 
 # --- MAIN PAGE ---
-
-# Glassmorphism style for main container
-st.markdown(
-    """
-    <style>
-    .main {
-        background: rgba(255, 255, 255, 0.15);
-        backdrop-filter: blur(15px);
-        border-radius: 15px;
-        padding: 25px;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        color: #111;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .dataframe th {
-        background-color: #4CAF50 !important;
-        color: white !important;
-        text-align: center !important;
-    }
-    .dataframe td {
-        text-align: center !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
 st.title("🌿 Sri Lanka District Environmental Ranking Dashboard")
 
-# Ranking table
+# --- RANKING TABLE ---
 st.subheader("📊 District Rankings by Environmental Score")
 ranked = scaled_data[['Rank', 'ADM2_EN', 'Environmental_Score']].sort_values('Rank').reset_index(drop=True)
 ranked['Environmental_Score'] = ranked['Environmental_Score'].round(3)
 
 def rank_badge(rank):
-    if rank == 1:
-        return "🥇"
-    elif rank == 2:
-        return "🥈"
-    elif rank == 3:
-        return "🥉"
-    else:
-        return ""
+    return {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "")
 
 ranked['Rank Badge'] = ranked['Rank'].apply(rank_badge)
 
@@ -121,11 +109,11 @@ st.dataframe(
     use_container_width=True
 )
 
-st.markdown("🏆 **Top 3 Districts:**")
-for idx, row in ranked.head(3).iterrows():
+st.markdown("**🏆 Top 3 Districts:**")
+for _, row in ranked.head(3).iterrows():
     st.markdown(f"{row['Rank Badge']} **{row['ADM2_EN']}** — Score: {row['Environmental_Score']}")
 
-# Bar chart for ranking
+# --- BAR CHART ---
 st.subheader("🏆 Environmental Scores by District")
 fig_bar = px.bar(
     ranked,
@@ -135,24 +123,17 @@ fig_bar = px.bar(
     color='Environmental_Score',
     color_continuous_scale='YlGnBu',
     labels={'Environmental_Score': 'Env. Score', 'ADM2_EN': 'District'},
-    title="District Environmental Score Ranking"
 )
 fig_bar.update_layout(yaxis=dict(autorange='reversed'))
 st.plotly_chart(fig_bar, use_container_width=True)
 
-# Radar chart for comparison
+# --- RADAR CHART ---
 if district_options:
     st.subheader("🕸️ District Profile Comparison (Radar Chart)")
     fig_radar = go.Figure()
     for dist in district_options:
-        # Use scaled_data for normalized radar values
         row = scaled_data[scaled_data['ADM2_EN'] == dist].iloc[0][features]
-        fig_radar.add_trace(go.Scatterpolar(
-            r=row.values,
-            theta=row.index,
-            fill='toself',
-            name=dist
-        ))
+        fig_radar.add_trace(go.Scatterpolar(r=row.values, theta=row.index, fill='toself', name=dist))
     fig_radar.update_layout(
         polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
         showlegend=True,
@@ -160,16 +141,13 @@ if district_options:
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
-# District-wise parameter table & map (show original values, NOT scaled)
+# --- TABLE + MAP ---
 st.subheader(f"🔍 District-wise Values & Map for Parameter: {selected_param}")
-
-param_table = merged[['ADM2_EN', selected_param]].sort_values(selected_param, ascending=False).reset_index(drop=True)
+param_table = merged[['ADM2_EN', selected_param]].sort_values(selected_param, ascending=False)
 
 st.dataframe(
-    param_table.style.background_gradient(
-        subset=[selected_param],
-        cmap='YlGnBu'
-    ).set_properties(**{'text-align': 'center'}),
+    param_table.style.background_gradient(subset=[selected_param], cmap='YlGnBu')
+                .set_properties(**{'text-align': 'center'}),
     use_container_width=True
 )
 
@@ -181,10 +159,11 @@ fig_map = px.choropleth_mapbox(
     hover_name='ADM2_EN',
     color_continuous_scale='YlGnBu',
     mapbox_style="carto-positron",
-    zoom=7,
+    zoom=6.5,
     center={"lat": 7.8731, "lon": 80.7718},
-    opacity=0.7,
-    labels={selected_param: selected_param}
+    opacity=0.8,
+    labels={selected_param: selected_param},
+    height=650  # Increased map size
 )
 fig_map.update_geos(fitbounds="locations", visible=False)
 fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
