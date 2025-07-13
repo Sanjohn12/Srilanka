@@ -18,7 +18,7 @@ def load_data():
     # Original data (actual values)
     df = pd.read_csv('District_Dashboard/District_Data_Modified.csv')
     # Load shapefile
-    shp_path = r"C:\Users\sanojan\Desktop\sano Tcp\srilanka shp\lka_admbnda_adm2_slsd_20220816.shp"
+    shp_path = "District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp"
     gdf = gpd.read_file(shp_path)
     return df, gdf
 
