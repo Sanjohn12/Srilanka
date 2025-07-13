@@ -4,3 +4,4 @@ geopandas
 scikit-learn
 plotly
 numpy
+matplotlib
