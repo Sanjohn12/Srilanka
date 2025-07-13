@@ -15,8 +15,8 @@ st.set_page_config(
 # --- LOAD AND CACHE RAW DATA ---
 @st.cache_data(show_spinner=True)
 def load_raw_data():
-    df = pd.read_csv("Srilanka/District_Dashboard/District_Data_Modified.csv")
-    shp_path = "Srilanka/District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp"
+    df = pd.read_csv("District_Dashboard/District_Data_Modified.csv")
+    shp_path = "District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp"
     gdf = gpd.read_file(shp_path)
     return df, gdf
 
