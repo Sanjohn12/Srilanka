@@ -16,9 +16,9 @@ st.set_page_config(
 @st.cache_data
 def load_data():
     # Original data (actual values)
-    df = pd.read_csv(r"C:\Users\sanojan\Desktop\sano Tcp\sem5\Studio\for any use\District_Data_Modified.csv")
+    df = pd.read_csv("Srilanka/District_Dashboard/District_Data_Modified.csv")
     # Load shapefile
-    shp_path = r"C:\Users\sanojan\Desktop\sano Tcp\srilanka shp\lka_admbnda_adm2_slsd_20220816.shp"
+    shp_path = "C:\Users\sanojan\Desktop\sano Tcp\srilanka shp\lka_admbnda_adm2_slsd_20220816.shp"
     gdf = gpd.read_file(shp_path)
     return df, gdf
 
