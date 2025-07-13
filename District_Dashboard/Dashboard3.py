@@ -1,24 +1,23 @@
-# Sri Lanka Environmental Dashboard (Improved)
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.preprocessing import MinMaxScaler
 import geopandas as gpd
+import json
 
-# --- PAGE CONFIGURATION ---
+# --- PAGE CONFIG ---
 st.set_page_config(
-    page_title="🌿 Sri Lanka Environmental Ranking Dashboard",
+    page_title="🌿 Sri Lanka Environmental Dashboard",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- PAGE STYLE: Make background white & readable ---
+# --- CLEAN STYLING ---
 st.markdown(
     """
     <style>
-    .main, .block-container {
+    .block-container {
         background-color: white;
         color: black;
     }
@@ -35,17 +34,17 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- LOAD DATA WITH CACHE ---
+# --- LOAD DATA ---
 @st.cache_data
 def load_data():
     df = pd.read_csv('Srilanka/District_Dashboard/District_Data_Modified.csv')
-    shp_path = "Srilanka/District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp"
-    gdf = gpd.read_file(shp_path)
+    gdf = gpd.read_file("Srilanka/District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp")
+    gdf = gdf.to_crs(epsg=4326)  # make sure it's in WGS84
     return df, gdf
 
 df, gdf = load_data()
 
-# --- PREPROCESSING ---
+# --- NORMALIZATION ---
 features = df.columns[1:]
 scaler = MinMaxScaler()
 scaled_data = df.copy()
@@ -63,77 +62,73 @@ bad = [
     'treeloss_treecover_Forest_Loss_km2',
     'District_Mean_SI_2020_2025_Mean_SI'
 ]
-
 for b in bad:
     scaled_data[b] = 1 - scaled_data[b]
 
 scaled_data['Environmental_Score'] = scaled_data[good + bad].mean(axis=1)
 scaled_data['Rank'] = scaled_data['Environmental_Score'].rank(ascending=False, method='min').astype(int)
 
-# --- MERGE GEO DATA ---
+# --- MERGE GEO & DATA ---
 merged = gdf.merge(df, on='ADM2_EN')
 merged = merged.merge(scaled_data[['ADM2_EN', 'Environmental_Score', 'Rank']], on='ADM2_EN')
+
+# --- GEOJSON CONVERSION ---
+merged['id'] = merged.index.astype(str)
+geojson_data = json.loads(merged.to_json())
 
 # --- SIDEBAR ---
 st.sidebar.header("🌿 Filter and Explore")
 
 district_options = st.sidebar.multiselect(
-    "Select districts for profile comparison (Radar Chart):",
+    "Select districts for radar chart:",
     options=scaled_data['ADM2_EN'],
     default=scaled_data['ADM2_EN'][:3].tolist()
 )
 
 selected_param = st.sidebar.selectbox(
-    "Select parameter to view district values and map:",
+    "Select parameter to map:",
     options=features,
     index=0
 )
 
-# --- MAIN PAGE ---
+# --- TITLE ---
 st.title("🌿 Sri Lanka District Environmental Ranking Dashboard")
 
 # --- RANKING TABLE ---
-st.subheader("📊 District Rankings by Environmental Score")
+st.subheader("📊 District Rankings")
 ranked = scaled_data[['Rank', 'ADM2_EN', 'Environmental_Score']].sort_values('Rank').reset_index(drop=True)
 ranked['Environmental_Score'] = ranked['Environmental_Score'].round(3)
-
-def rank_badge(rank):
-    return {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, "")
-
-ranked['Rank Badge'] = ranked['Rank'].apply(rank_badge)
+ranked['Rank Badge'] = ranked['Rank'].apply(lambda r: {1: "🥇", 2: "🥈", 3: "🥉"}.get(r, ""))
 
 st.dataframe(
     ranked.style.highlight_max(subset=['Environmental_Score'], color='#85C1E9')
-          .format({"Environmental_Score": "{:.3f}"})
-          .set_properties(**{'text-align': 'center'}),
+          .format({"Environmental_Score": "{:.3f}"}).set_properties(**{'text-align': 'center'}),
     use_container_width=True
 )
 
-st.markdown("**🏆 Top 3 Districts:**")
+st.markdown("🏆 **Top 3 Districts:**")
 for _, row in ranked.head(3).iterrows():
     st.markdown(f"{row['Rank Badge']} **{row['ADM2_EN']}** — Score: {row['Environmental_Score']}")
 
 # --- BAR CHART ---
-st.subheader("🏆 Environmental Scores by District")
+st.subheader("🏆 Scores by District")
 fig_bar = px.bar(
-    ranked,
-    x='Environmental_Score',
-    y='ADM2_EN',
-    orientation='h',
-    color='Environmental_Score',
-    color_continuous_scale='YlGnBu',
-    labels={'Environmental_Score': 'Env. Score', 'ADM2_EN': 'District'},
+    ranked, x='Environmental_Score', y='ADM2_EN',
+    orientation='h', color='Environmental_Score',
+    color_continuous_scale='YlGnBu'
 )
 fig_bar.update_layout(yaxis=dict(autorange='reversed'))
 st.plotly_chart(fig_bar, use_container_width=True)
 
 # --- RADAR CHART ---
 if district_options:
-    st.subheader("🕸️ District Profile Comparison (Radar Chart)")
+    st.subheader("🕸️ District Radar Comparison")
     fig_radar = go.Figure()
     for dist in district_options:
         row = scaled_data[scaled_data['ADM2_EN'] == dist].iloc[0][features]
-        fig_radar.add_trace(go.Scatterpolar(r=row.values, theta=row.index, fill='toself', name=dist))
+        fig_radar.add_trace(go.Scatterpolar(
+            r=row.values, theta=row.index, fill='toself', name=dist
+        ))
     fig_radar.update_layout(
         polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
         showlegend=True,
@@ -141,10 +136,9 @@ if district_options:
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
-# --- TABLE + MAP ---
-st.subheader(f"🔍 District-wise Values & Map for Parameter: {selected_param}")
+# --- MAP + PARAM TABLE ---
+st.subheader(f"🔍 Values & Map for: {selected_param}")
 param_table = merged[['ADM2_EN', selected_param]].sort_values(selected_param, ascending=False)
-
 st.dataframe(
     param_table.style.background_gradient(subset=[selected_param], cmap='YlGnBu')
                 .set_properties(**{'text-align': 'center'}),
@@ -153,8 +147,8 @@ st.dataframe(
 
 fig_map = px.choropleth_mapbox(
     merged,
-    geojson=merged.geometry,
-    locations=merged.index,
+    geojson=geojson_data,
+    locations='id',
     color=selected_param,
     hover_name='ADM2_EN',
     color_continuous_scale='YlGnBu',
@@ -163,9 +157,7 @@ fig_map = px.choropleth_mapbox(
     center={"lat": 7.8731, "lon": 80.7718},
     opacity=0.8,
     labels={selected_param: selected_param},
-    height=650  # Increased map size
+    height=680
 )
-fig_map.update_geos(fitbounds="locations", visible=False)
 fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-
 st.plotly_chart(fig_map, use_container_width=True)
