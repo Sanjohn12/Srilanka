@@ -12,43 +12,47 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- LOAD AND CACHE RAW DATA ---
-@st.cache_data(show_spinner=True)
-def load_raw_data():
-    df = pd.read_csv("District_Dashboard/District_Data_Modified.csv")
-    shp_path = "District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp"
+# --- LOAD DATA WITH CACHE ---
+@st.cache_data
+def load_data():
+    # Original data (actual values)
+    df = pd.read_csv("Srilanka/District_Dashboard/District_Data_Modified.csv")
+    # Load shapefile
+    shp_path = "Srilanka/District_Dashboard/lka_admbnda_adm2_slsd_20220816.shp"
     gdf = gpd.read_file(shp_path)
     return df, gdf
 
-# --- PREPROCESSING & MERGING (CACHE THIS TOO!) ---
-@st.cache_data(show_spinner=True)
-def preprocess_and_merge(df, gdf):
-    features = df.columns[1:]
-    scaler = MinMaxScaler()
-    scaled_data = df.copy()
-    scaled_data[features] = scaler.fit_transform(df[features])
+df, gdf = load_data()
 
-    good = ['Rain_dist_Mean_Rainfall_mm', 'District_Mean_NDVI_2020_2025_Mean_NDVI',
-            'canopy_dist_Mean_Canopy_Height', 'treeloss_treecover_Mean_TreeCover2000']
-    bad = ['co_dist_Mean_CO', 'District_Mean_NO2_2019_2024_Mean_NO2',
-           'treeloss_treecover_Forest_Loss_km2', 'District_Mean_SI_2020_2025_Mean_SI']
+# --- DATA PREPROCESSING FOR SCORING ---
 
-    for b in bad:
-        scaled_data[b] = 1 - scaled_data[b]
+features = df.columns[1:]  # all parameters except district name
+scaler = MinMaxScaler()
+scaled_data = df.copy()
+scaled_data[features] = scaler.fit_transform(df[features])
 
-    scaled_data['Environmental_Score'] = scaled_data[good + bad].mean(axis=1)
-    scaled_data['Rank'] = scaled_data['Environmental_Score'].rank(ascending=False, method='min').astype(int)
+# Define good and bad parameters
+good = ['Rain_dist_Mean_Rainfall_mm', 'District_Mean_NDVI_2020_2025_Mean_NDVI',
+        'canopy_dist_Mean_Canopy_Height', 'treeloss_treecover_Mean_TreeCover2000']
+bad = ['co_dist_Mean_CO', 'District_Mean_NO2_2019_2024_Mean_NO2',
+       'treeloss_treecover_Forest_Loss_km2', 'District_Mean_SI_2020_2025_Mean_SI']
 
-    merged = gdf.merge(df, on='ADM2_EN')
-    merged = merged.merge(scaled_data[['ADM2_EN', 'Environmental_Score', 'Rank']], on='ADM2_EN')
+# Invert bad parameters
+for b in bad:
+    scaled_data[b] = 1 - scaled_data[b]
 
-    return features, scaled_data, merged
+# Composite score
+scaled_data['Environmental_Score'] = scaled_data[good + bad].mean(axis=1)
+scaled_data['Rank'] = scaled_data['Environmental_Score'].rank(ascending=False, method='min').astype(int)
 
-# Load data once and preprocess once (cached)
-df, gdf = load_raw_data()
-features, scaled_data, merged = preprocess_and_merge(df, gdf)
+# --- MERGE ALL ORIGINAL PARAMS INTO GEO DATAFRAME FOR MAPPING ---
+
+# Merge original data (df) + scaled_data scoring columns to gdf for map & table use
+merged = gdf.merge(df, on='ADM2_EN')  # original actual parameters
+merged = merged.merge(scaled_data[['ADM2_EN', 'Environmental_Score', 'Rank']], on='ADM2_EN')
 
 # --- SIDEBAR ---
+
 st.sidebar.header("🌿 Filter and Explore")
 
 district_options = st.sidebar.multiselect(
@@ -65,7 +69,7 @@ selected_param = st.sidebar.selectbox(
 
 # --- MAIN PAGE ---
 
-# Glassmorphism style for main container (your original style)
+# Glassmorphism style for main container
 st.markdown(
     """
     <style>
@@ -141,6 +145,7 @@ if district_options:
     st.subheader("🕸️ District Profile Comparison (Radar Chart)")
     fig_radar = go.Figure()
     for dist in district_options:
+        # Use scaled_data for normalized radar values
         row = scaled_data[scaled_data['ADM2_EN'] == dist].iloc[0][features]
         fig_radar.add_trace(go.Scatterpolar(
             r=row.values,
